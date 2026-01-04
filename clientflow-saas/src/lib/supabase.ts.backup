@@ -1,0 +1,13 @@
+import { createClient } from '@supabase/supabase-js';
+
+// Use environment variables or hardcode for testing
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://spktkgkjquowfpkqyevz.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNwa3RrZ2tqcXVvd2Zwa3F5ZXZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjczMTEyODEsImV4cCI6MjA4Mjg4NzI4MX0.w_9AQQClyh5Du4nGNCMMHS1brWzvLTpWAp6qa11VyEs';
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  },
+});
