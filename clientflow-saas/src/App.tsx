@@ -103,7 +103,7 @@ function App() {
             <Route path="/clients" element={<ClientsPage isPreview={!canAccessPaid} />} />
             <Route path="/jobs" element={<JobsPage isPreview={!canAccessPaid} />} />
             <Route path="/invoices" element={<InvoicesPage isPreview={!canAccessPaid} />} />
-            <Route path="/billing" element={<BillingPage />} />
+            <Route path="/billing" element={<BillingPage canAccessPaid={canAccessPaid} />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </AppLayout>

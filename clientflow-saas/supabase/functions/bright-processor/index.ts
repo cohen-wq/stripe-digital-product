@@ -109,6 +109,19 @@ Deno.serve(async (req) => {
         metadata: { supabase_user_id: user.id },
       }));
 
+    // Ensure a subscription row exists for this user/customer
+    const { error: upsertErr } = await supabaseAdmin
+      .from("user_subscriptions")
+      .upsert({
+        user_id: user.id,
+        stripe_customer_id: customer.id,
+        status: "inactive",
+        updated_at: new Date().toISOString(),
+      });
+    if (upsertErr) {
+      console.error("user_subscriptions upsert error:", upsertErr.message);
+    }
+
     // ✅ Create Checkout Session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
