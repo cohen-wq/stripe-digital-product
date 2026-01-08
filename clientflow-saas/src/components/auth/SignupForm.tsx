@@ -46,7 +46,7 @@ export default function SignupForm() {
   };
 
   return (
-    <div className="max-w-md mx-auto mt-10 p-6 bg-white rounded-lg shadow-md">
+    <div className="w-full max-w-md mx-auto mt-6 sm:mt-8 p-5 sm:p-6 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-6">Create Account</h2>
       <form onSubmit={handleSignup}>
         <div className="mb-4">
