@@ -1,12 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "../../lib/supabase";
 import { createClient, type ClientRow } from "../../lib/db";
 
 type Props = {
   onSave: (client: ClientRow) => void;
   onClose: () => void;
+  initialClient?: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    company: string | null;
+  } | null;
 };
 
-export default function ClientForm({ onSave, onClose }: Props) {
+export default function ClientForm({ onSave, onClose, initialClient }: Props) {
+  const isEdit = !!initialClient?.id;
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -14,6 +24,21 @@ export default function ClientForm({ onSave, onClose }: Props) {
 
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Prefill when editing (or when switching which client is being edited)
+  useEffect(() => {
+    if (initialClient) {
+      setName(initialClient.name ?? "");
+      setEmail(initialClient.email ?? "");
+      setPhone(initialClient.phone ?? "");
+      setCompany(initialClient.company ?? "");
+    } else {
+      setName("");
+      setEmail("");
+      setPhone("");
+      setCompany("");
+    }
+  }, [initialClient]);
 
   async function handleSubmit() {
     if (!name.trim()) {
@@ -25,17 +50,41 @@ export default function ClientForm({ onSave, onClose }: Props) {
       setSaving(true);
       setErrorMsg(null);
 
+      if (isEdit && initialClient?.id) {
+        // Update existing client
+        const { data, error } = await supabase
+          .from("clients")
+          .update({
+            name: name.trim(),
+            email: email.trim() ? email.trim() : null,
+            phone: phone.trim() ? phone.trim() : null,
+            company: company.trim() ? company.trim() : null,
+          })
+          .eq("id", initialClient.id)
+          .select("*")
+          .single();
+
+        if (error) throw error;
+
+        // Keep the parent flow the same: call onSave then close
+        onSave(data as ClientRow);
+        onClose();
+        return;
+      }
+
+      // Create new client (your existing helper)
       const newClient = await createClient({
-        name,
-        email,
-        phone,
-        company,
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        company: company.trim(),
       });
 
       onSave(newClient);
       onClose();
     } catch (err: any) {
-      setErrorMsg(err?.message ?? "Failed to create client");
+      console.error(err);
+      setErrorMsg(err?.message ?? "Failed to save client");
     } finally {
       setSaving(false);
     }
@@ -45,7 +94,9 @@ export default function ClientForm({ onSave, onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">Add Client</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            {isEdit ? "Edit Client" : "Add Client"}
+          </h2>
           <button
             onClick={onClose}
             className="rounded-md px-3 py-1 text-sm text-gray-700 hover:bg-gray-100"
@@ -124,7 +175,7 @@ export default function ClientForm({ onSave, onClose }: Props) {
               className="rounded-md bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 disabled:opacity-60"
               disabled={saving}
             >
-              {saving ? "Saving..." : "Save Client"}
+              {saving ? "Saving..." : isEdit ? "Save Changes" : "Save Client"}
             </button>
           </div>
         </div>

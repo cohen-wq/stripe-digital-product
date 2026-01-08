@@ -7,10 +7,6 @@ export type ClientRow = {
   email: string | null;
   phone: string | null;
   company: string | null;
-  status: "active" | "inactive" | "lead" | null;
-  value: number | null;
-  projects: number | null;
-  last_contact: string | null; // date string
   created_at: string;
 };
 
@@ -23,9 +19,10 @@ async function getCurrentUserId(): Promise<string> {
 
 export async function fetchClients(): Promise<ClientRow[]> {
   const userId = await getCurrentUserId();
+
   const { data, error } = await supabase
     .from("clients")
-    .select("*")
+    .select("id, user_id, name, email, phone, company, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -41,22 +38,18 @@ export async function createClient(input: {
 }): Promise<ClientRow> {
   const userId = await getCurrentUserId();
 
+  const payload = {
+    user_id: userId,
+    name: input.name.trim(),
+    email: input.email?.trim() || null,
+    phone: input.phone?.trim() || null,
+    company: input.company?.trim() || null,
+  };
+
   const { data, error } = await supabase
     .from("clients")
-    .insert([
-      {
-        user_id: userId,
-        name: input.name.trim(),
-        email: input.email?.trim() || null,
-        phone: input.phone?.trim() || null,
-        company: input.company?.trim() || null,
-        status: "lead",
-        value: 0,
-        projects: 0,
-        last_contact: null,
-      },
-    ])
-    .select("*")
+    .insert([payload])
+    .select("id, user_id, name, email, phone, company, created_at")
     .single();
 
   if (error) throw error;

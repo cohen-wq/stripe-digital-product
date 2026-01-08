@@ -10,6 +10,7 @@ import {
   addMonths,
   subMonths,
 } from "date-fns";
+import { useNavigate } from "react-router-dom";
 import EventForm from "./EventForm";
 import { supabase } from "../../lib/supabase";
 
@@ -17,9 +18,9 @@ interface CalendarEvent {
   id: string;
   title: string;
   description: string;
-  date: string; // yyyy-MM-dd (UI format)
-  startTime: string; // HH:mm (UI format)
-  endTime: string; // HH:mm (UI format)
+  date: string; // yyyy-MM-dd (UI field)
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
   type: "meeting" | "call" | "job" | "deadline" | "reminder" | "other";
   color: string;
   jobId?: string;
@@ -27,29 +28,21 @@ interface CalendarEvent {
   user_id: string;
 }
 
-type DBEventRow = {
-  id: string;
-  user_id: string;
-  title: string;
-  description: string | null;
-  event_date: string; // yyyy-MM-dd
-  start_time: string; // HH:mm
-  end_time: string; // HH:mm
-  event_type: CalendarEvent["type"];
-  color: string;
-  job_id: string | null;
-  client_name: string | null;
-};
+export default function Calendar({ isPreview = false }: { isPreview?: boolean }) {
+  const navigate = useNavigate();
 
-export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
-
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [showEventForm, setShowEventForm] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), "yyyy-MM-dd"));
+
+  const [status, setStatus] = useState<{ type: "idle" | "ok" | "err"; message: string }>({
+    type: "idle",
+    message: "",
+  });
 
   const months = Array.from({ length: 12 }, (_, i) => ({
     value: i,
@@ -59,53 +52,68 @@ export default function Calendar() {
   const currentYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => currentYear - 5 + i);
 
-  const mapDbToUi = (row: DBEventRow): CalendarEvent => {
-    return {
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      description: row.description ?? "",
-      date: row.event_date,
-      startTime: row.start_time,
-      endTime: row.end_time,
-      type: row.event_type,
-      color: row.color,
-      jobId: row.job_id ?? "",
-      clientName: row.client_name ?? "",
-    };
+  const daysInMonth = eachDayOfInterval({
+    start: startOfMonth(currentDate),
+    end: endOfMonth(currentDate),
+  });
+
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const monthYear = format(currentDate, "MMMM yyyy");
+
+  const goSubscribe = () => navigate("/billing");
+
+  const previewBlocked = () => {
+    setStatus({
+      type: "err",
+      message: "Preview mode: Subscribe to create or edit calendar events.",
+    });
+    goSubscribe();
   };
+
+  // DB row (snake_case + event_date) -> UI event (camelCase + date)
+  const normalizeRow = (row: any): CalendarEvent => ({
+    id: row.id,
+    title: row.title ?? "",
+    description: row.description ?? "",
+    date: row.event_date ?? "",
+    startTime: row.start_time ?? "09:00",
+    endTime: row.end_time ?? "10:00",
+    type: (row.type ?? "meeting") as CalendarEvent["type"],
+    color: row.color ?? "bg-blue-500",
+    jobId: row.job_id ?? "",
+    clientName: row.client_name ?? "",
+    user_id: row.user_id,
+  });
 
   const loadEvents = async () => {
     setLoading(true);
     try {
       const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-      if (sessionError) throw sessionError;
+      if (userError) throw userError;
 
-      if (!session?.user) {
+      if (!user) {
         setEvents([]);
         return;
       }
 
-      // IMPORTANT: use your actual DB column names here
       const { data, error } = await supabase
         .from("calendar_events")
-        .select(
-          "id,user_id,title,description,event_date,start_time,end_time,event_type,color,job_id,client_name"
-        )
+        .select("id,title,description,event_date,start_time,end_time,type,color,job_id,client_name,user_id")
         .order("event_date", { ascending: true })
         .order("start_time", { ascending: true });
 
       if (error) throw error;
 
-      const mapped = (data as DBEventRow[] | null)?.map(mapDbToUi) ?? [];
-      setEvents(mapped);
-    } catch (err) {
-      console.error(err);
+      setEvents((data ?? []).map(normalizeRow));
+      setStatus({ type: "idle", message: "" });
+    } catch (err: any) {
+      console.error("loadEvents error:", err);
       setEvents([]);
+      setStatus({ type: "err", message: err?.message || "Could not load events." });
     } finally {
       setLoading(false);
     }
@@ -114,14 +122,6 @@ export default function Calendar() {
   useEffect(() => {
     loadEvents();
   }, []);
-
-  const daysInMonth = eachDayOfInterval({
-    start: startOfMonth(currentDate),
-    end: endOfMonth(currentDate),
-  });
-
-  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const monthYear = format(currentDate, "MMMM yyyy");
 
   const getEventsForDate = (date: Date) => {
     const dateStr = format(date, "yyyy-MM-dd");
@@ -140,93 +140,94 @@ export default function Calendar() {
   };
 
   const handleAddEvent = (date: Date) => {
+    if (isPreview) return previewBlocked();
+
     setSelectedDate(format(date, "yyyy-MM-dd"));
     setSelectedEvent(null);
     setShowEventForm(true);
+    setStatus({ type: "idle", message: "" });
   };
 
   const handleEditEvent = (event: CalendarEvent) => {
+    if (isPreview) return previewBlocked();
+
     setSelectedEvent(event);
     setShowEventForm(true);
+    setStatus({ type: "idle", message: "" });
   };
 
   const handleSaveEvent = async (eventData: Omit<CalendarEvent, "id" | "user_id">) => {
+    if (isPreview) return previewBlocked();
+
     try {
+      setStatus({ type: "idle", message: "" });
+
       const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-      if (sessionError) throw sessionError;
-      if (!session?.user) throw new Error("Not signed in");
+      if (userError) throw userError;
+      if (!user) {
+        setStatus({ type: "err", message: "Not signed in." });
+        return;
+      }
 
-      // Map UI fields -> DB fields (snake_case)
       const payload = {
+        user_id: user.id,
         title: eventData.title,
-        description: eventData.description || null,
-        event_date: eventData.date, // MUST match DB: event_date
+        description: eventData.description,
+        event_date: eventData.date,
         start_time: eventData.startTime,
         end_time: eventData.endTime,
-        event_type: eventData.type,
+        type: eventData.type,
         color: eventData.color,
-        job_id: eventData.jobId?.trim() ? eventData.jobId.trim() : null,
-        client_name: eventData.clientName?.trim() ? eventData.clientName.trim() : null,
+        job_id: eventData.jobId?.trim() ? eventData.jobId : null,
+        client_name: eventData.clientName?.trim() ? eventData.clientName : null,
       };
 
       if (selectedEvent) {
-        const { data, error } = await supabase
-          .from("calendar_events")
-          .update(payload)
-          .eq("id", selectedEvent.id)
-          .select(
-            "id,user_id,title,description,event_date,start_time,end_time,event_type,color,job_id,client_name"
-          )
-          .single();
-
+        const { error } = await supabase.from("calendar_events").update(payload).eq("id", selectedEvent.id);
         if (error) throw error;
-
-        const mapped = mapDbToUi(data as DBEventRow);
-        setEvents((prev) => prev.map((e) => (e.id === selectedEvent.id ? mapped : e)));
+        setStatus({ type: "ok", message: "Event updated." });
       } else {
-        const { data, error } = await supabase
-          .from("calendar_events")
-          .insert({
-            user_id: session.user.id,
-            ...payload,
-          })
-          .select(
-            "id,user_id,title,description,event_date,start_time,end_time,event_type,color,job_id,client_name"
-          )
-          .single();
-
+        const { error } = await supabase.from("calendar_events").insert(payload);
         if (error) throw error;
-
-        const mapped = mapDbToUi(data as DBEventRow);
-        setEvents((prev) => [...prev, mapped]);
+        setStatus({ type: "ok", message: "Event added." });
       }
 
       setShowEventForm(false);
       setSelectedEvent(null);
-    } catch (err) {
-      console.error(err);
+
+      await loadEvents();
+    } catch (err: any) {
+      console.error("handleSaveEvent error:", err);
+      setStatus({ type: "err", message: err?.message || "Save failed." });
     }
   };
 
   const handleDeleteEvent = async (id: string) => {
+    if (isPreview) return previewBlocked();
+
     try {
+      setStatus({ type: "idle", message: "" });
+
       const { error } = await supabase.from("calendar_events").delete().eq("id", id);
       if (error) throw error;
 
-      setEvents((prev) => prev.filter((e) => e.id !== id));
       setShowEventForm(false);
       setSelectedEvent(null);
-    } catch (err) {
-      console.error(err);
+
+      setStatus({ type: "ok", message: "Event deleted." });
+      await loadEvents();
+    } catch (err: any) {
+      console.error("handleDeleteEvent error:", err);
+      setStatus({ type: "err", message: err?.message || "Delete failed." });
     }
   };
 
   const getEventTypeIcon = (type: CalendarEvent["type"]) => {
-    const icons: Record<CalendarEvent["type"], string> = {
+    const icons = {
       meeting: "👥",
       call: "📞",
       job: "💼",
@@ -242,45 +243,58 @@ export default function Calendar() {
       .slice()
       .sort(
         (a, b) =>
-          new Date(a.date + "T" + a.startTime).getTime() -
-          new Date(b.date + "T" + b.startTime).getTime()
+          new Date(a.date + "T" + a.startTime).getTime() - new Date(b.date + "T" + b.startTime).getTime()
       )
       .filter((event) => new Date(event.date) >= new Date())
       .slice(0, 5);
   }, [events]);
 
-  const eventsCountDisplay = loading ? 0 : events.length;
-
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Calendar & Agenda</h2>
           <p className="text-gray-600">Schedule and manage all your events</p>
         </div>
 
-        {/* ✅ Only keep Add Event (removes Today/Month/Week/Day buttons) */}
-        <button
-          onClick={() => {
-            setSelectedDate(format(new Date(), "yyyy-MM-dd"));
-            setSelectedEvent(null);
-            setShowEventForm(true);
-          }}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium flex items-center gap-2"
-        >
-          <span>+</span>
-          <span>Add Event</span>
-        </button>
+        {/* Add Event (locked in preview) */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => {
+              if (isPreview) return previewBlocked();
+
+              setSelectedDate(format(new Date(), "yyyy-MM-dd"));
+              setSelectedEvent(null);
+              setShowEventForm(true);
+              setStatus({ type: "idle", message: "" });
+            }}
+            disabled={isPreview}
+            className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition ${
+              isPreview
+                ? "bg-gray-200 text-gray-400 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 text-white"
+            }`}
+            title={isPreview ? "Subscribe to unlock" : "Add Event"}
+          >
+            <span>+</span>
+            <span>Add Event</span>
+          </button>
+        </div>
       </div>
 
-      {/* Month/Year Navigation (kept) */}
+      {status.type !== "idle" && (
+        <div
+          className={`mb-4 rounded-md px-3 py-2 text-sm ${
+            status.type === "ok" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+          }`}
+        >
+          {status.message}
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
         <div className="flex items-center gap-4">
-          <button
-            onClick={handlePrevMonth}
-            className="p-2 hover:bg-gray-100 rounded-full"
-            title="Previous Month"
-          >
+          <button onClick={handlePrevMonth} className="p-2 hover:bg-gray-100 rounded-full" title="Previous Month">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
@@ -326,11 +340,7 @@ export default function Calendar() {
             </div>
           </div>
 
-          <button
-            onClick={handleNextMonth}
-            className="p-2 hover:bg-gray-100 rounded-full"
-            title="Next Month"
-          >
+          <button onClick={handleNextMonth} className="p-2 hover:bg-gray-100 rounded-full" title="Next Month">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
@@ -340,11 +350,10 @@ export default function Calendar() {
         <div className="text-xl font-semibold text-gray-800 hidden md:block">{monthYear}</div>
 
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">Events: {eventsCountDisplay}</span>
+          <span className="text-sm text-gray-600">Events: {loading ? 0 : events.length}</span>
         </div>
       </div>
 
-      {/* Calendar Grid */}
       <div className="grid grid-cols-7 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden">
         {weekdays.map((day: string) => (
           <div key={day} className="bg-gray-50 p-3 text-center">
@@ -362,8 +371,9 @@ export default function Calendar() {
               key={index}
               className={`min-h-[120px] bg-white p-2 ${!isCurrentMonth ? "bg-gray-50" : ""} ${
                 isCurrentDay ? "bg-blue-50" : ""
-              }`}
+              } ${isPreview ? "cursor-default" : "cursor-pointer"}`}
               onClick={() => handleAddEvent(day)}
+              title={isPreview ? "Subscribe to add events" : "Add event"}
             >
               <div className="flex justify-between items-start mb-1">
                 <span
@@ -382,12 +392,18 @@ export default function Calendar() {
                 {dayEvents.slice(0, 3).map((event) => (
                   <div
                     key={event.id}
-                    className={`text-xs p-1 rounded cursor-pointer ${event.color} text-white truncate`}
+                    className={`text-xs p-1 rounded ${event.color} text-white truncate ${
+                      isPreview ? "cursor-default opacity-90" : "cursor-pointer"
+                    }`}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleEditEvent(event);
                     }}
-                    title={`${event.title} (${event.startTime}-${event.endTime})`}
+                    title={
+                      isPreview
+                        ? "Subscribe to edit events"
+                        : `${event.title} (${event.startTime}-${event.endTime})`
+                    }
                   >
                     <div className="flex items-center gap-1">
                       <span>{getEventTypeIcon(event.type)}</span>
@@ -404,7 +420,6 @@ export default function Calendar() {
         })}
       </div>
 
-      {/* Upcoming Events */}
       <div className="mt-8">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Upcoming Events</h3>
 
@@ -414,12 +429,15 @@ export default function Calendar() {
           </div>
         )}
 
-        <div className="space-y-3">
+        <div className={`space-y-3 ${isPreview ? "opacity-95" : ""}`}>
           {upcomingEvents.map((event) => (
             <div
               key={event.id}
-              className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer"
+              className={`flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 ${
+                isPreview ? "cursor-default" : "cursor-pointer"
+              }`}
               onClick={() => handleEditEvent(event)}
+              title={isPreview ? "Subscribe to edit events" : "Edit event"}
             >
               <div className={`w-3 h-3 rounded-full ${event.color}`}></div>
               <div className="flex-1">
@@ -444,8 +462,8 @@ export default function Calendar() {
         </div>
       </div>
 
-      {/* Event Form Modal */}
-      {showEventForm && (
+      {/* Paid/admin only: form never appears in preview */}
+      {!isPreview && showEventForm && (
         <EventForm
           event={selectedEvent}
           selectedDate={selectedDate}

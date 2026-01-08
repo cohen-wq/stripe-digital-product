@@ -1,303 +1,255 @@
-import { useState } from 'react';
+import { useEffect, useState } from "react";
+import { supabase } from "../../lib/supabase";
 
-interface JobFormProps {
-    onSave: (jobData: any) => void;
-    onClose: () => void;
-    onAddToCalendar?: (eventData: any) => void;
-}
+type JobStatus = "planned" | "in_progress" | "awaiting_payment" | "completed";
 
-export default function JobForm({ onSave, onClose, onAddToCalendar }: JobFormProps) {
-    const [formData, setFormData] = useState({
-        title: '',
-        description: '',
-        clientName: '',
-        status: 'pending',
-        priority: 'medium',
-        dueDate: '',
-        budget: '',
-        assignedTo: ''
-    });
-    const [addToCalendar, setAddToCalendar] = useState(false);
-    const [calendarEventTime, setCalendarEventTime] = useState('09:00');
-    const [calendarEventType, setCalendarEventType] = useState<'job' | 'meeting' | 'deadline'>('job');
+type Client = {
+  id: string;
+  name: string;
+  company?: string | null;
+};
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
+export type Job = {
+  id?: string;
+  client_id?: string | null;
+  title: string;
+  description?: string | null;
+  status: JobStatus;
+  start_date?: string | null; // yyyy-mm-dd
+  due_date?: string | null;   // yyyy-mm-dd
+  amount_estimated?: number | null; // matches DB column
+};
+
+export default function JobForm({
+  job,
+  onClose,
+  onSaved,
+}: {
+  job?: Job | null;
+  onClose: () => void;
+  onSaved: () => void; // IMPORTANT: we use onSaved everywhere (not onSave)
+}) {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string>("");
+
+  const [form, setForm] = useState<Job>({
+    client_id: null,
+    title: "",
+    description: "",
+    status: "planned",
+    start_date: null,
+    due_date: null,
+    amount_estimated: 0,
+  });
+
+  useEffect(() => {
+    if (job) {
+      setForm({
+        id: job.id,
+        client_id: job.client_id ?? null,
+        title: job.title ?? "",
+        description: job.description ?? "",
+        status: job.status ?? "planned",
+        start_date: job.start_date ?? null,
+        due_date: job.due_date ?? null,
+        amount_estimated: Number(job.amount_estimated ?? 0),
+      });
+    } else {
+      setForm({
+        client_id: null,
+        title: "",
+        description: "",
+        status: "planned",
+        start_date: null,
+        due_date: null,
+        amount_estimated: 0,
+      });
+    }
+  }, [job]);
+
+  useEffect(() => {
+    const fetchClients = async () => {
+      // If your clients table exists, this will populate the dropdown.
+      const { data } = await supabase
+        .from("clients")
+        .select("id, name, company")
+        .order("created_at", { ascending: false });
+
+      setClients((data as Client[]) || []);
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        const jobData = { ...formData };
-        
-        // Save the job
-        onSave(jobData);
-        
-        // If Add to Calendar is checked, create calendar event
-        if (addToCalendar && onAddToCalendar) {
-            const calendarEvent = {
-                title: `${formData.title} - ${formData.clientName}`,
-                description: formData.description || `Job: ${formData.title}`,
-                date: formData.dueDate || new Date().toISOString().split('T')[0],
-                startTime: calendarEventTime,
-                endTime: formatEndTime(calendarEventTime),
-                type: calendarEventType,
-                color: getEventColor(calendarEventType),
-                clientName: formData.clientName,
-                jobId: `JOB-${Date.now()}`
-            };
-            onAddToCalendar(calendarEvent);
-            alert(`Job created and added to calendar as ${calendarEventType}!`);
-        }
+    fetchClients();
+  }, []);
+
+  const setField = (key: keyof Job, value: any) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const save = async () => {
+    setErrorMsg("");
+    const title = (form.title ?? "").trim();
+    if (!title) {
+      setErrorMsg("Title is required.");
+      return;
+    }
+
+    setLoading(true);
+
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+
+    if (userErr || !user) {
+      setLoading(false);
+      setErrorMsg("You must be signed in to save a job.");
+      return;
+    }
+
+    const payload = {
+      user_id: user.id,
+      client_id: form.client_id ?? null,
+      title,
+      description: form.description ?? "",
+      status: form.status,
+      start_date: form.start_date || null,
+      due_date: form.due_date || null,
+      amount_estimated: Number(form.amount_estimated ?? 0),
     };
 
-    const formatEndTime = (startTime: string) => {
-        const [hours, minutes] = startTime.split(':').map(Number);
-        const endHour = hours + 1;
-        return `${endHour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
-    };
+    const res = job?.id
+      ? await supabase.from("jobs").update(payload).eq("id", job.id)
+      : await supabase.from("jobs").insert(payload);
 
-    const getEventColor = (type: string) => {
-        switch (type) {
-            case 'job': return 'bg-green-500';
-            case 'meeting': return 'bg-blue-500';
-            case 'deadline': return 'bg-red-500';
-            default: return 'bg-green-500';
-        }
-    };
+    if (res.error) {
+      setLoading(false);
+      setErrorMsg(res.error.message);
+      return;
+    }
 
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <div className="p-6">
-                    <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-gray-800">Create New Job</h2>
-                        <button
-                            onClick={onClose}
-                            className="text-gray-500 hover:text-gray-700 text-2xl"
-                        >
-                            &times;
-                        </button>
-                    </div>
+    setLoading(false);
+    onSaved();   // refresh the list
+    onClose();   // close the modal
+  };
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Job Title *
-                            </label>
-                            <input
-                                type="text"
-                                name="title"
-                                value={formData.title}
-                                onChange={handleChange}
-                                required
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="Enter job title"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Description
-                            </label>
-                            <textarea
-                                name="description"
-                                value={formData.description}
-                                onChange={handleChange}
-                                rows={3}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="Describe the job details"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Client/Business Name *
-                                </label>
-                                <input
-                                    type="text"
-                                    name="clientName"
-                                    value={formData.clientName}
-                                    onChange={handleChange}
-                                    required
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="Enter client name"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Priority
-                                </label>
-                                <select
-                                    name="priority"
-                                    value={formData.priority}
-                                    onChange={handleChange}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                    <option value="low">Low</option>
-                                    <option value="medium">Medium</option>
-                                    <option value="high">High</option>
-                                    <option value="urgent">Urgent</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Due Date
-                            </label>
-                            <input
-                                type="date"
-                                name="dueDate"
-                                value={formData.dueDate}
-                                onChange={handleChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Budget ($)
-                                </label>
-                                <input
-                                    type="number"
-                                    name="budget"
-                                    value={formData.budget}
-                                    onChange={handleChange}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="0.00"
-                                    min="0"
-                                    step="0.01"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Status
-                                </label>
-                                <select
-                                    name="status"
-                                    value={formData.status}
-                                    onChange={handleChange}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                    <option value="pending">Pending</option>
-                                    <option value="in_progress">In Progress</option>
-                                    <option value="on_hold">On Hold</option>
-                                    <option value="completed">Completed</option>
-                                    <option value="cancelled">Cancelled</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Assigned To
-                            </label>
-                            <input
-                                type="text"
-                                name="assignedTo"
-                                value={formData.assignedTo}
-                                onChange={handleChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                placeholder="Team member name or email"
-                            />
-                        </div>
-
-                        {/* Add to Calendar Section */}
-                        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                            <div className="flex items-start mb-3">
-                                <input
-                                    type="checkbox"
-                                    id="addToCalendar"
-                                    checked={addToCalendar}
-                                    onChange={(e) => setAddToCalendar(e.target.checked)}
-                                    className="mt-1 mr-3"
-                                />
-                                <div>
-                                    <label htmlFor="addToCalendar" className="block text-sm font-medium text-blue-800 cursor-pointer">
-                                        Add to Calendar
-                                    </label>
-                                    <p className="text-xs text-blue-600">
-                                        Create a calendar event for this job
-                                    </p>
-                                </div>
-                            </div>
-
-                            {addToCalendar && (
-                                <div className="space-y-3 pl-7">
-                                    <div>
-                                        <label className="block text-xs font-medium text-blue-700 mb-1">
-                                            Event Type
-                                        </label>
-                                        <select
-                                            value={calendarEventType}
-                                            onChange={(e) => setCalendarEventType(e.target.value as any)}
-                                            className="w-full px-3 py-1 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                        >
-                                            <option value="job">Job/Project</option>
-                                            <option value="meeting">Client Meeting</option>
-                                            <option value="deadline">Deadline</option>
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label className="block text-xs font-medium text-blue-700 mb-1">
-                                            Start Time
-                                        </label>
-                                        <input
-                                            type="time"
-                                            value={calendarEventTime}
-                                            onChange={(e) => setCalendarEventTime(e.target.value)}
-                                            className="w-full px-3 py-1 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                        />
-                                    </div>
-
-                                    <div className="text-xs text-blue-600 bg-blue-100 p-2 rounded">
-                                        <p><strong>Event will be created with:</strong></p>
-                                        <p>• Title: "{formData.title || '[Job Title]'}"</p>
-                                        <p>• Date: {formData.dueDate || 'Today'}</p>
-                                        <p>• Time: {calendarEventTime} - {formatEndTime(calendarEventTime)}</p>
-                                        <p>• Type: {calendarEventType}</p>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex justify-between gap-3 pt-4 border-t">
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <div className="flex gap-3">
-                                {addToCalendar && (
-                                    <button
-                                        type="submit"
-                                        className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition"
-                                    >
-                                        Create Job & Add to Calendar
-                                    </button>
-                                )}
-                                <button
-                                    type="submit"
-                                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md transition"
-                                >
-                                    {addToCalendar ? 'Create Job Only' : 'Create Job'}
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white w-full max-w-3xl rounded-2xl p-8">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-semibold">{job ? "Edit Job" : "New Job"}</h2>
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-black">
+            Close
+          </button>
         </div>
-    );
+
+        {errorMsg && (
+          <div className="mb-4 text-sm text-red-600">
+            {errorMsg}
+          </div>
+        )}
+
+        <div className="space-y-5">
+          <div>
+            <label className="text-sm text-gray-600">Client (optional)</label>
+            <select
+              value={form.client_id ?? ""}
+              onChange={(e) => setField("client_id", e.target.value || null)}
+              className="w-full mt-2 border rounded-lg px-3 py-2"
+            >
+              <option value="">No client</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.company ? ` — ${c.company}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Title</label>
+            <input
+              value={form.title}
+              onChange={(e) => setField("title", e.target.value)}
+              className="w-full mt-2 border rounded-lg px-3 py-2"
+              placeholder="Application Build"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm text-gray-600">Description</label>
+            <textarea
+              value={form.description ?? ""}
+              onChange={(e) => setField("description", e.target.value)}
+              className="w-full mt-2 border rounded-lg px-3 py-2 min-h-[120px]"
+              placeholder="Optional details…"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-5">
+            <div>
+              <label className="text-sm text-gray-600">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setField("status", e.target.value)}
+                className="w-full mt-2 border rounded-lg px-3 py-2"
+              >
+                <option value="planned">Planned</option>
+                <option value="in_progress">In Progress</option>
+                <option value="awaiting_payment">Awaiting Payment</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm text-gray-600">Estimated Amount ($)</label>
+              <input
+                type="number"
+                value={Number(form.amount_estimated ?? 0)}
+                onChange={(e) => setField("amount_estimated", e.target.value)}
+                className="w-full mt-2 border rounded-lg px-3 py-2"
+                placeholder="5000"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-5">
+            <div>
+              <label className="text-sm text-gray-600">Start date</label>
+              <input
+                type="date"
+                value={form.start_date ?? ""}
+                onChange={(e) => setField("start_date", e.target.value || null)}
+                className="w-full mt-2 border rounded-lg px-3 py-2"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm text-gray-600">Due date</label>
+              <input
+                type="date"
+                value={form.due_date ?? ""}
+                onChange={(e) => setField("due_date", e.target.value || null)}
+                className="w-full mt-2 border rounded-lg px-3 py-2"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4">
+            <button onClick={onClose} className="px-5 py-2 rounded-lg border">
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={loading}
+              className="px-5 py-2 rounded-lg bg-black text-white disabled:opacity-60"
+            >
+              {loading ? "Saving..." : "Save Job"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -1,7 +1,14 @@
+import { Lock } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 
-export default function TopNav() {
+export default function TopNav({
+  canAccessPaid,
+  onSubscribe,
+}: {
+  canAccessPaid: boolean;
+  onSubscribe: () => void;
+}) {
   const navigate = useNavigate();
 
   async function handleSignOut() {
@@ -20,7 +27,13 @@ export default function TopNav() {
     <nav className="bg-white shadow-md border-b">
       <div className="container mx-auto px-4">
         <div className="flex items-center justify-between h-16">
-          <div className="text-xl font-bold text-gray-900">ClientFlow</div>
+          <div className="flex items-center">
+            <img
+              src="/taskperch-logo.png"
+              alt="TaskPerch"
+              className="h-14 w-auto"
+            />
+          </div>
 
           <div className="flex items-center gap-2">
             <NavLink
@@ -38,7 +51,10 @@ export default function TopNav() {
                 `${linkBase} ${isActive ? linkActive : linkInactive}`
               }
             >
-              Clients
+              <span className="flex items-center gap-1">
+                Clients
+                {!canAccessPaid && <Lock size={14} />}
+              </span>
             </NavLink>
 
             <NavLink
@@ -47,7 +63,10 @@ export default function TopNav() {
                 `${linkBase} ${isActive ? linkActive : linkInactive}`
               }
             >
-              Calendar
+              <span className="flex items-center gap-1">
+                Calendar
+                {!canAccessPaid && <Lock size={14} />}
+              </span>
             </NavLink>
 
             <NavLink
@@ -56,7 +75,10 @@ export default function TopNav() {
                 `${linkBase} ${isActive ? linkActive : linkInactive}`
               }
             >
-              Jobs
+              <span className="flex items-center gap-1">
+                Jobs
+                {!canAccessPaid && <Lock size={14} />}
+              </span>
             </NavLink>
 
             <NavLink
@@ -65,8 +87,29 @@ export default function TopNav() {
                 `${linkBase} ${isActive ? linkActive : linkInactive}`
               }
             >
-              Invoices
+              <span className="flex items-center gap-1">
+                Invoices
+                {!canAccessPaid && <Lock size={14} />}
+              </span>
             </NavLink>
+
+            <NavLink
+              to="/billing"
+              className={({ isActive }) =>
+                `${linkBase} ${isActive ? linkActive : linkInactive}`
+              }
+            >
+              Billing
+            </NavLink>
+
+            {!canAccessPaid && (
+              <button
+                onClick={onSubscribe}
+                className="ml-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Subscribe
+              </button>
+            )}
 
             <button
               onClick={handleSignOut}
