@@ -19,14 +19,14 @@ export default function TopNav({
   }
 
   const linkBase =
-    "px-3 py-2 rounded-md text-sm font-medium transition-colors";
+    "px-2 py-1.5 sm:px-3 sm:py-2 rounded-md text-xs sm:text-sm font-medium transition-colors whitespace-nowrap";
   const linkActive = "bg-blue-600 text-white";
   const linkInactive = "text-gray-700 hover:bg-gray-100";
 
   return (
     <nav className="bg-white shadow-md border-b">
       <div className="container mx-auto px-4">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-2 sm:py-0 sm:h-16 gap-2">
           <div className="flex items-center">
             <img
               src="/taskperch-logo.png"
@@ -35,7 +35,7 @@ export default function TopNav({
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
             <NavLink
               to="/"
               className={({ isActive }) =>
@@ -105,7 +105,7 @@ export default function TopNav({
             {!canAccessPaid && (
               <button
                 onClick={onSubscribe}
-                className="ml-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                className="ml-1 rounded-md bg-blue-600 px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-semibold text-white hover:bg-blue-700 whitespace-nowrap"
               >
                 Subscribe
               </button>
@@ -113,7 +113,7 @@ export default function TopNav({
 
             <button
               onClick={handleSignOut}
-              className="ml-2 rounded-md border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              className="ml-2 rounded-md border border-gray-200 px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-medium text-gray-700 hover:bg-gray-50 whitespace-nowrap"
             >
               Sign out
             </button>
